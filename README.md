@@ -2,26 +2,21 @@
 
 Integrates Sass executable compiler with Gradle.
 
-- [About](#about)
+- [Version 2.0.0](#version-200)
 - [Usage](#usage)
 	- [Configuration](#configuration)
 	- [Properties entry](#properties-entry)
 	- [Defined task](#defined-task)
+- [Example](#example)
 
-## About
+## Version 2.0.0
 
-This is a fork of SalomonBry's [Gradle Sass][1] with some changes and additional features:
-
-- Defaults to any globally accessible Sass implementation ([Ruby Sass][2], [Dart Sass][3], [JavaScript Sass][4], etc.).
-- Download and use of official [Dart Sass][3] release is now optional.
-- Uses [properties](#properties-entry) file for command-line arguments to support other Sass CLI implementation.
-- Minified CSS are automatically suffixed with `.min.css` extension.
-- Preserve trailing semi-colon of minified CSS to support JavaFX stylesheets.
-
-Advantages over other Sass implementations in Java:
-
-1. [Number unit][5] calculation...
-2. Basically, all the latest features of Sass! :smile:
+- Code clean up (minimized unnecessary lines of code)
+- Updated dependencies, Kotlin, and Gradle version
+- Updated default Dart Sass version to `1.25.0`
+- Defaults to download Dart Sass executable to project root
+- Added `suffix` extension property for custom CSS output extension
+- [Properties entry](#properties-entry) for command-line arguments is set to optional
 
 
 ## Usage
@@ -30,14 +25,13 @@ Apply using the plugins DSL:
 
 ```gradle
 plugins {
-    id("com.meiuwa.gradle.sass") version "1.0.0"
+    id("com.meiuwa.gradle.sass") version "2.0.0"
 }
 ```
 
 ### Configuration
 
-By default, it uses the globally accessible Sass command,
-you can change this behavior by overriding the default `sass` extension properties:
+Default `sass` extension properties:
 
 <table>
 	<tr>
@@ -48,12 +42,17 @@ you can change this behavior by overriding the default `sass` extension properti
 	<tr>
 		<td><code>executable</code></td>
 		<td><code>"sass"</code> (or <code>"sass.bat"</code>)</td>
-		<td>The sass executable either globally accessible or an absolute file path</td>
+		<td>The Sass executable either globally accessible or an absolute file path (defaults to Dart Sass executable if <code>download</code> is set to <code>enabled<code>)</td>
 	</tr>
 	<tr>
 		<td><code>properties</code></td>
-		<td><code>"$projectDir/sass.properties"</code></td>
-		<td>The properties file containing all supported command-line arguments</td>
+		<td><code>"$rootDir/sass.properties"</code></td>
+		<td>The properties file containing all other supported command-line arguments (optional)</td>
+	</tr>
+	<tr>
+		<td><code>suffix</code></td>
+		<td><code>"css"</code></td>
+		<td>Custom CSS output extension (define the compiled CSS extension)</td>
 	</tr>
 	<tr>
 		<td><code>preserved</code></td>
@@ -62,16 +61,7 @@ you can change this behavior by overriding the default `sass` extension properti
 	</tr>
 </table>
 
-```gradle
-sass {
-    executable = "$rootDir/sass"
-    properties = "$rootDir/sass.properties"
-    preserved = true
-}
-```
-
-If you prefer to download and use the official [Dart Sass][3] release locally,
-you can override the following default properties:
+Default Dart Sass `download` extension properties:
 
 <table>
 	<tr>
@@ -81,57 +71,77 @@ you can override the following default properties:
 	</tr>
 	<tr>
 		<td><code>url</code></td>
-		<td><code>"https://github.com/sass/dart-sass/releases/download/"</code></td>
-		<td>A direct URL of Dart Sass archive</td>
+		<td><code>"https://github.com/sass/dart-sass/releases/download"</code></td>
+		<td>A direct URL of Dart Sass archive (defaults to Dart Sass GitHub release which automatically determine the appropriate executable for the current running platform)</td>
 	</tr>
 	<tr>
 		<td><code>version</code></td>
-		<td><code>"1.23.0"</code></td>
-		<td>The Dart Sass GitHub release version</td>
+		<td><code>"1.25.0"</code></td>
+		<td>The Dart Sass GitHub release version (not required if <code>url</code> is set to direct download)</td>
 	</tr>
 	<tr>
 		<td><code>output</code></td>
 		<td><code>"$rootDir/.sass"</code></td>
 		<td>The directory path to save and extract the archive</td>
 	</tr>
+    <tr>
+		<td><code>enabled</code></td>
+		<td><code>true</code></td>
+		<td>Whether download and use the specified Dart Sass release, or not (requires <code>executable</code> to be accessible if set to <code>false</code>)</td>
+	</tr>
 </table>
 
-```gradle
-sass {
-    properties = "$rootDir/sass.properties"
-    download()
-}
-```
-
-To use a specific version:
+`sass` extension properties configuration:
 
 ```gradle
 sass {
     properties = "$rootDir/sass.properties"
+    suffix = 'min.css'
+    preserved = true
     download {
-        version = "1.23.0"
+        version = '1.25.0'
+        enabled = true
     }
 }
 ```
 
-Or specify a direct URL of Dart Sass archive:
+Dart Sass is the default executable, if you want to use any global executable instead:
+
+```gradle
+sass {
+    executable = 'sass'
+    download {
+        enabled = false
+    }
+}
+```
+
+Or if you just want to use a different version of Dart Sass:
+
+```gradle
+sass {
+    download {
+        version = '1.25.0'
+    }
+}
+```
+
+Or specify a direct URL of Dart Sass archive with `zip` or `tar` format:
 
 ```gradle
 sass {
     properties = "$rootDir/sass.properties"
     download {
-        url = "https://github.com/sass/dart-sass/releases/download/1.23.0/dart-sass-1.23.0-macos-x64.tar.gz"
+        url = 'https://github.com/sass/dart-sass/releases/download/1.25.0/dart-sass-1.25.0-macos-x64.tar.gz'
         output = "$rootDir/.sass"
     }
 }
 ```
 
-> Note: Currently supports only Dart Sass archive with either `zip` or `tar` format.
-
 
 ### Properties entry
 
-All possible command-line arguments supported by the executable are defined as entries in a properties file:
+All other possible command-line arguments supported by the executable are defined as entries in a properties file. This is to support other implementation of Sass CLI (see [`Dart Sass CLI`](https://sass-lang.com/documentation/cli/dart-sass) documentation).
 
 For flags that require a value:
 
@@ -148,37 +158,34 @@ And for single flags that doesn't require a value:
 
 ### Defined task
 
-The `sassCompile` task handles both the download and compilation process.
-The default input source and output directories are also defined in this task.
-It is a type of [SourceTask][6] in which sources can be configured with an
-`include` and `exclude` pattern set to filter files within the directory:
+The `sassCompile` task handles both the download and compilation process. It is a type of [SourceTask](https://docs.gradle.org/current/dsl/org.gradle.api.tasks.SourceTask.html)
+in which output and source input must be defined manually, and source could also be configured with an `include` and `exclude` pattern set to filter files within the directory:
 
-Groovy DSL:
+Groovy DSL configuration:
 
 ```gradle
 sassCompile {
+    output = file("build/sass")
     source = fileTree("src/main/sass")
     include("**/*.sass", "**/*.scss")
     exclude("**/_*.sass", "**/_*.scss")
-    output = file("build/sass")
 }
 ```
 
-Kotlin DSL:
+Kotlin DSL configuration:
 
 ```gradle
-tasks.named("sassCompile") {
+import com.meiuwa.gradle.sass.SassTask
+//...
+
+tasks.named<SassTask>("sassCompile") {
+    output = file("build/sass")
     source = fileTree("src/main/sass")
     include("**/*.sass", "**/*.scss")
     exclude("**/_*.sass", "**/_*.scss")
-    output = file("build/sass")
 }
 ```
 
+## Example
 
-[1]: https://github.com/SalomonBrys/gradle-sass
-[2]: https://sass-lang.com/ruby-sass
-[3]: https://github.com/sass/dart-sass
-[4]: https://www.npmjs.com/package/sass
-[5]: http://www.sass-lang.com/documentation/values/numbers#units
-[6]: https://docs.gradle.org/current/dsl/org.gradle.api.tasks.SourceTask.html
+See [this](https://github.com/meiuwa/javafx-template) JavaFX template for an example usage.
