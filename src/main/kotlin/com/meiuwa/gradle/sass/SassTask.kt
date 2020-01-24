@@ -5,115 +5,96 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.SourceTask
 import org.gradle.api.tasks.TaskAction
 import org.gradle.internal.os.OperatingSystem
-import java.io.IOException
 import java.util.Properties
 
 open class SassTask : SourceTask() {
     @OutputDirectory var output = project.buildDir.resolve("sass")
 
-    init {
-        description = "Compiles main Sass source."
-        source = project.fileTree("${project.projectDir}/src/main/sass") {
-            it.include("**/*.sass", "**/*.scss")
-            it.exclude("**/_*.sass", "**/_*.scss")
-        }
-    }
-
     @TaskAction fun compile() {
         val ext = project.extensions.findByName("sass") as SassExtension
+        if (ext.download.enabled) download(ext.download.url, ext.download.version, ext.download.output)
         val properties = load(ext.properties)
-        if (ext.download != null) download(
-            ext.download!!.url,
-            ext.download!!.version,
-            ext.download!!.output
-        )
+        val arguments = parse(properties)
         val executable = when {
-            ext.download != null ->
-                project.file("${ext.download!!.output}/dart-sass/$DEFAULT_SASS_EXECUTABLE").canonicalPath
+            ext.download.enabled ->
+                project.file("${ext.download.output}/dart-sass/$DEFAULT_SASS_EXECUTABLE").canonicalPath
             else -> ext.executable
         }
-        val arguments = parse(properties)
-        val minify = properties.containsKey("--style") &&
-            "compressed" == properties.getProperty("--style")
-        val preserved = minify && ext.preserved
-        execute(executable, arguments, minify, preserved)
+        val preserved = when {
+            properties != null ->
+                properties.containsKey("--style") && "compressed" == properties.getProperty("--style") && ext.preserved
+            else -> false
+        }
+        execute(executable, arguments, ext.suffix, preserved)
     }
 
-    private fun download(baseUrl: String, version: String, outputDir: String) {
-        if (!project.file("${outputDir}/dart-sass").exists()) {
-            val (zip, tar) = "zip" to "tar.gz"
-            var (os, ext) = when {
-                OperatingSystem.current().isLinux -> "linux" to tar
-                OperatingSystem.current().isMacOsX -> "macos" to tar
-                OperatingSystem.current().isWindows -> "windows" to zip
-                else -> throw IllegalStateException("Unsupported Operating System")
+    private fun download(baseUrl: String, version: String, output: String) {
+        // construct:
+        val (zip, tar) = "zip" to "tar.gz"
+        var (os, ext) = when {
+            OperatingSystem.current().isLinux -> "linux" to tar
+            OperatingSystem.current().isMacOsX -> "macos" to tar
+            OperatingSystem.current().isWindows -> "windows" to zip
+            else -> throw IllegalStateException("Unsupported Operating System")
+        }
+        val arch = if ("64" in System.getProperty("os.arch")) "x64" else "ia32"
+        var archive = "dart-sass-$version-$os-$arch.$ext"
+        val url = when (baseUrl) {
+            DEFAULT_DOWNLOAD_URL -> "$baseUrl/$version/$archive"
+            else -> baseUrl.also {
+                archive = it.substring(it.lastIndexOf("/") + 1)
+                ext = archive.substring(archive.lastIndexOf(".") + 1)
+                if (ext != zip || ext != tar) throw IllegalArgumentException("Invalid URL or unsupported archive format")
             }
-            val arch = if ("64" in System.getProperty("os.arch")) "x64" else "ia32"
-            var archive = "dart-sass-$version-$os-$arch.$ext"
-            val separator = if (baseUrl.endsWith("/")) "" else "/"
-            val url = when (baseUrl) {
-                "$DEFAULT_DOWNLOAD_URL$separator" -> "$baseUrl$separator$version/$archive"
-                else -> baseUrl.also {
-                    archive = it.substring(it.lastIndexOf("/") + 1)
-                    ext = archive.substring(archive.lastIndexOf(".") + 1)
+        }
+        val release = project.file("$output/$archive")
+        // download:
+        project.tasks.register("sassDownload", Download::class.java).get().apply {
+            src(url)
+            dest(release)
+            downloadTaskDir(output)
+            tempAndMove(true)
+            overwrite(false)
+            download()
+        }
+        // extract:
+        project.copy {
+            it.from(when (ext) {
+                zip -> project.zipTree(release)
+                else -> project.tarTree(release)
+            })
+            it.into(output)
+        }
+    }
+
+    private fun load(properties: String): Properties? = when {
+        !project.file(properties).exists() -> null
+        else -> Properties().apply { load(project.file(properties).inputStream()) }
+    }
+
+    private fun parse(properties: Properties?): MutableList<String> = when (properties) {
+        null -> arrayListOf()
+        else -> arrayListOf<String>().apply {
+            for ((key, value) in properties) {
+                val entry = when (key) {
+                    "--load-path" -> "$key=${project.file(value).canonicalPath}"
+                    else -> if ((value as String).isEmpty()) (key as String) else "$key=$value"
                 }
-            }
-            val release = project.file("$outputDir/$archive")
-
-            project.tasks.register("sassDownload", Download::class.java).get().also {
-                it.src(url)
-                it.dest(release)
-                it.downloadTaskDir(outputDir)
-                it.tempAndMove(true)
-                it.overwrite(false)
-                it.download()
-            }
-
-            project.copy {
-                it.from(when (ext) {
-                    zip -> project.zipTree(release)
-                    else -> project.tarTree(release)
-                })
-                it.into(outputDir)
+                add(entry)
             }
         }
     }
 
-    private fun load(properties: String): Properties {
-        return Properties().also { it.load(project.file(properties).inputStream()) }
-    }
-
-    private fun parse(properties: Properties): MutableList<String> {
-        return arrayListOf<String>().also { list ->
-            properties.stringPropertyNames().forEach { key ->
-                val value = properties.getProperty(key).let { value ->
-                    when (key) {
-                        "--load-path" -> project.file(value).let { path ->
-                            if (!path.exists() || !path.isDirectory) {
-                                throw IOException("Sass properties entry: $key=$value could not be resolved")
-                            }
-                            path.canonicalPath
-                        }
-                        else -> value
-                    }
-                }
-                list.add( if (value.isEmpty()) key else "$key=$value" )
-            }
-        }
-    }
-
-    private fun execute(executable: String, arguments: MutableList<String>, minify: Boolean, preserved: Boolean){
+    private fun execute(executable: String, arguments: MutableList<String>, suffix: String, preserved: Boolean){
         source.visit { v ->
             if (v.isDirectory) return@visit
-            val css = project.file("$output/${v.relativePath.parent.pathString}/${v.file.nameWithoutExtension}".let { n ->
-                if (minify) "$n.min.css" else "$n.css"
-            })
-            val list = arrayListOf(v.file.canonicalPath, css.canonicalPath).also { l -> l.addAll(arguments) }
+            val css = project.file("$output/${v.relativePath.parent.pathString}/${v.file.nameWithoutExtension}.$suffix")
+            arguments.addAll(arrayListOf(v.file.canonicalPath, css.canonicalPath))
             project.exec { e ->
                 e.executable(executable)
-                e.args(list)
+                e.args(arguments)
             }
-            if (preserved) css.writeText(css.readText().replace(CLOSING_DECLARATION_BLOCK, ";}"))
+            if (preserved) css.writeText(css.readText().replace(CLOSING_CSS_DECLARATION_BLOCK, ";}"))
         }
     }
 }
